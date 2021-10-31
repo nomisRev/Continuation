@@ -18,6 +18,7 @@ kotlin {
       dependencies {
         implementation(kotlin("stdlib-common"))
         implementation("io.arrow-kt:arrow-core:1.0.0")
+        implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.5.2")
       }
     }
     commonTest {
