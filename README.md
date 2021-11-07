@@ -112,6 +112,10 @@ suspend fun <R, A> Either<R, A>.bind(): A =
     is Either.Left -> shift(value)
     is Either.Right -> value
   }
+
+context(ContEffect<None>)
+fun <A> Option<A>.bind(): A =
+  fold({ shift(it) }, ::identity)
 ```
 
 ## Handling errors
