@@ -101,6 +101,9 @@ of `fold`. Implementing the `toEither()` operator is as simple as:
 ```kotlin
 suspend fun <R, A> Cont<R, A>.toEither(): Either<R, A> =
   fold({ Either.Left(it) }) { Either.Right(it) }
+
+suspend fun <A> Cont<None, A>.toOption(): Option<A> =
+  fold(::identity) { Some(it) }
 ```
 
 Adding your own syntax to `ContEffect<R>` is tricky atm, but will be easy once "Multiple Receivers" become available.
