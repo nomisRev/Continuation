@@ -16,9 +16,8 @@ kotlin {
   sourceSets {
     commonMain {
       dependencies {
-        implementation(kotlin("stdlib-common"))
-        implementation("io.arrow-kt:arrow-core:1.0.0")
-        implementation("io.arrow-kt:arrow-fx-coroutines:1.0.0")
+        api(kotlin("stdlib-common"))
+        api("io.arrow-kt:arrow-core:1.0.0")
       }
     }
     commonTest {
