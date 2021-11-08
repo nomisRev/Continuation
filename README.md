@@ -8,8 +8,7 @@ receiver `suspend ContEffect<R>.() -> A`.
 
 What is interesting about the `Cont<R, A>` type is that it doesn't rely on any wrappers such as `Either`, `Ior`
 or `Validated`. Instead `Cont<R, A>` represents a suspend function, and only when we call `fold` it will actually create
-a `Continuation` and run the computation.
-
+a `Continuation` and runs the computation (without intrecepting).
 This makes `Cont<R, A>` a very efficient generic runtime.
 
 ## Writing a program with Cont<R, A>
@@ -43,10 +42,9 @@ fun readFile(path: String?): Cont<EmptyPath, Unit> = cont {
 }
 ```
 
-Now that we have the path, we can read the from the `File` and return it as a domain model `Content`
-We also want to take a look at what exceptions reading from a file might occur `FileNotFoundException` & `SecurityError`
-, so lets make some domain errors for those too. Grouping them as a sealed interface is useful since that way we can
-resolve *all* errors in a type safe manner.
+Now that we have the path, we can read from the `File` and return it as a domain model `Content`.
+We also want to take a look at what exceptions reading from a file might occur `FileNotFoundException` & `SecurityError`,
+so lets make some domain errors for those too. Grouping them as a sealed interface is useful since that way we can resolve *all* errors in a type safe manner.
 
 ```kotlin
 @JvmInline
@@ -60,8 +58,7 @@ value class FileNotFound(val path: String) : FileError()
 object EmptyPath : FileError()
 ```
 
-We can finish our function, but we need to refactor our return value from `Unit` to `Content` and our error type
-from `EmptyPath` to `FileError`.
+We can finish our function, but we need to refactor our return value from `Unit` to `Content` and our error type from `EmptyPath` to `FileError`.
 
 ```kotlin
 fun readFile(path: String): Cont<FileError, Content> = cont {
@@ -81,7 +78,7 @@ The `readFile` function defines a `suspend fun` that will return:
 
 - the `Content` of a given `path`
 - a `FileError`
-- An unexpected fatal error (OutOfMemoryException)
+- An unexpected fatal error (`OutOfMemoryException`)
 
 Since these are the properties of our `Cont` function, we can turn it into a value.
 
@@ -150,7 +147,120 @@ val captured: Cont<String, Result<Int>> = cont<String, Int> {
 }.attempt()
 ```
 
-**NOTE**:
-cancellation of Coroutines in Kotlin works exception based, so one can also recover from errors of type `R`
-using `try/catch`. It's however not recommended to capture `Throwable`, or Arrow's `ControlThrowable`. More can be read
-in ContAndStructuredConcurrency.md
+Note:
+ Handling errors can also be done with `try/catch` but this is **not recommended**, it uses `CancellationException` which is used to cancel `Coroutine`s and is advised not to capture in Kotlin. 
+ The `CancellationException` from `Cont` is `ShiftCancellationException`, this type is public so you can distinct the exceptions if necessary.
+
+## Structured Concurrency
+
+`Cont<R, A>` relies on `kotlin.cancellation.CancellationException` to `shift` error values of type `R` inside the `Continuation` since it effectively cancels/short-circuits it.
+For this reason `shift` adheres to the same rules as [`Structured Concurrency`](https://kotlinlang.org/docs/coroutines-basics.html#structured-concurrency)
+
+Let's overview below how `shift` behaves with the different concurrency builders from Arrow Fx & KotlinX Coroutines.
+
+### Arrow Fx Coroutines
+All operators in Arrow Fx Coroutines run in place, so they have no way of leaking `shift`.
+It's there always safe to compose `cont` with any Arrow Fx combinator. Let's see some small examples below.
+
+#### parZip
+```kotlin
+cont<String, Int> {
+  parZip({
+   delay(1_000_000) // Cancelled by shift 
+  }, { shift<Int>("error") }) { _, int -> int }
+}.fold(::println, ::println) // "error"
+```
+#### parTraverse
+```kotlin
+cont<String, Int> {
+ (0..100).parTraverse { index -> // running tasks
+   if(index == 50) shift<Int>("error")
+   else index.also { delay(1_000_000) } // Cancelled by shift
+ }
+}.fold(::println, ::println) // "error"
+```
+#### raceN
+```kotlin
+cont<String, Int> {
+  raceN({
+   delay(1_000_000) // Cancelled by shift
+   5
+  }) { shift<Int>("error") }
+   .merge() // Flatten Either<Int, Int> result from race into Int
+}.fold(::println, ::println) // "error"
+```
+#### bracketCase / Resource
+```kotlin
+cont<String, Int> {
+  bracketCase(
+   acquire = { File("gradle.properties") },
+   use = { file -> 
+    // some logic
+    shift("file doesn't contain right content")
+   },
+   release = { file, exitCase ->
+    file.close()
+    println(exitCase) // ExitCase.Cancelled(ShiftCancellationException("Shifted Continuation"))
+   }
+  )
+}.fold(::println, ::println) // "file doesn't contain right content"
+
+fun file(path: String): Resource<File> {
+  Resource({ File(path) }, { file, exitCase ->
+   file.close()
+   println(exitCase)
+  })
+}
+
+cont<String, Int> {
+ file("gradle.properties").use { file ->
+  // some logic
+  shift("file doesn't contain right content")
+ } // ExitCase.Cancelled(ShiftCancellationException("Shifted Continuation")) printed from release
+}
+```
+### KotlinX
+#### withContext
+It's always safe to call `shift` from `withContext` since it runs in place, so it has no way of leaking `shift`.
+When `shift` is called from within `withContext` it will cancel all `Job`s running inside the `CoroutineScope` of `withContext`.
+
+```kotlin
+  cont<String, Int> {
+    withContext(Dispatchers.IO) {
+      launch { delay(1_000_000) } // launch gets cancelled due to shift(FileNotFound("failure"))
+      val sleeper = async { delay(1_000_000) } // async gets cancelled due to shift(FileNotFound("failure"))
+      readFile("failure").bind()
+      sleeper.await()
+    }
+  }.fold(::println, ::println) // FileNotFound("failure")
+```
+
+#### async
+
+When calling `shift` from `async` you should always call `await`, otherwise `shift` can leak out of its scope.
+
+#### launch
+
+
+**NOTE**
+Capturing `shift` into a lambda, and leaking it outside of `Cont` to be invoked outside will yield unexpected results.
+Below we capture `shift` from inside the DSL, and then invoke it outside its context `ContEffect<String>z
+
+```kotlin
+cont<String, suspend () -> Unit> {
+ suspend { shift("error") }
+}.fold({ }, { leakedShift -> leakedShift.invoke() })
+```
+
+The same violation is possible in all DSLs in Kotlin, including Structured Concurrency.
+
+```kotlin
+val leakedAsync = coroutineScope<suspend () -> Deferred<Unit>> {
+  suspend {
+    async {
+      println("I am never going to run, until I get called invoked from outside")
+    }
+  }
+}
+leakedAsync.invoke().await()
+```
