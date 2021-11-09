@@ -54,10 +54,15 @@ configure<KnitPluginExtension> {
 
 tasks {
   withType<DokkaTask>().configureEach {
+    outputDirectory.set(rootDir.resolve("docs"))
+    moduleName.set("Continuation")
     dokkaSourceSets {
       named("commonMain") {
-        moduleName.set("Continuation")
         includes.from("README.md")
+        perPackageOption {
+          matchingRegex.set(".*\\.internal.*")
+          suppress.set(true)
+        }
         sourceLink {
           localDirectory.set(file("src/commonMain/kotlin"))
           remoteUrl.set(uri("https://github.com/nomisRev/Continuation/tree/main/src/commonMain/kotlin").toURL())

@@ -54,4 +54,11 @@ class ReadmeTest {
             "FileNotFound(path=failure)"
         )
     }
+
+    @Test
+    fun testExampleReadme10() {
+        captureOutput("ExampleReadme10") { example.exampleReadme10.main() }.also { lines ->
+            check(lines.isEmpty())
+        }
+    }
 }
