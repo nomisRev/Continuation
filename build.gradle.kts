@@ -1,7 +1,16 @@
+buildscript {
+  dependencies {
+    classpath("org.jetbrains.kotlinx:kotlinx-knit:0.2.3")
+  }
+}
+
 plugins {
   kotlin("multiplatform") version "1.5.31" apply true
   id("io.kotest.multiplatform") version "5.0.0.5" apply true
 }
+
+apply(plugin = "kotlinx-knit")
+
 
 group "com.github.nomisrev"
 version "1.0"
@@ -25,7 +34,7 @@ kotlin {
         implementation("io.kotest:kotest-property:5.0.0.M3")
         implementation("io.kotest:kotest-framework-engine:5.0.0.M3")
         implementation("io.kotest:kotest-assertions-core:5.0.0.M3")
-        api("io.arrow-kt:arrow-fx-coroutines:1.0.0")
+        implementation("io.arrow-kt:arrow-fx-coroutines:1.0.0")
       }
     }
     named("jvmTest") {

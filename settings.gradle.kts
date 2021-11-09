@@ -1,2 +1,2 @@
 rootProject.name = "Continuation"
-include("example")
+include("guide")

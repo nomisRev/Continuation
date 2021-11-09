@@ -1,5 +1,23 @@
 # Cont<R, A>
 
+<!--- TEST_NAME ReadmeTest -->
+<!--- TOC -->
+
+* [Writing a program with Cont<R, A>](#writing-a-program-with-cont<r-a>)
+* [Handling errors](#handling-errors)
+* [Structured Concurrency](#structured-concurrency)
+  * [Arrow Fx Coroutines](#arrow-fx-coroutines)
+    * [parZip](#parzip)
+    * [parTraverse](#partraverse)
+    * [raceN](#racen)
+    * [bracketCase / Resource](#bracketcase--resource)
+  * [KotlinX](#kotlinx)
+    * [withContext](#withcontext)
+    * [async](#async)
+    * [launch](#launch)
+
+<!--- END -->
+
 `Cont<R, A>` represents a function of `suspend () -> A` that can fail with `R` (and `Throwable`), so it's defined
 by `suspend fun <B> fold(f: suspend (R) -> B, g: suspend (A) -> B): B`.
 
@@ -22,6 +40,9 @@ we can raise an error of any arbitrary type `R` by using the function `shift`. T
 changing, especially unexpectedly), away from the computation and finishing the `Continuation` with `R`.
 
 ```kotlin
+import arrow.Cont
+import arrow.cont
+
 object EmptyPath
 
 fun readFile(path: String): Cont<EmptyPath, Unit> = cont {
@@ -37,31 +58,42 @@ and `kotlin.requireNotNull`. They're named `ensure` and `ensureNotNull` to avoid
 So let's rewrite the function from above to use the DSL instead.
 
 ```kotlin
-fun readFile(path: String?): Cont<EmptyPath, Unit> = cont {
-  ensure(path.isNotEmpty()) { EmptyPath }
+fun readFile2(path: String?): Cont<EmptyPath, Unit> = cont {
+  ensure(!path.isNullOrBlank()) { EmptyPath }
 }
 ```
+
+> You can get the full code [here](guide/example/example-readme-01.kt).
 
 Now that we have the path, we can read from the `File` and return it as a domain model `Content`.
 We also want to take a look at what exceptions reading from a file might occur `FileNotFoundException` & `SecurityError`,
 so lets make some domain errors for those too. Grouping them as a sealed interface is useful since that way we can resolve *all* errors in a type safe manner.
 
 ```kotlin
+import arrow.Cont
+import arrow.cont
+import arrow.ensureNotNull
+import arrow.core.None
+import java.io.File
+import java.io.FileNotFoundException
+import kotlinx.coroutines.runBlocking
+
 @JvmInline
 value class Content(val body: List<String>)
 
 sealed interface FileError
-@JvmInline
-value class SecurityError(val msg: String?) : FileError()
-@JvmInline
-value class FileNotFound(val path: String) : FileError()
-object EmptyPath : FileError()
+@JvmInline value class SecurityError(val msg: String?) : FileError
+@JvmInline value class FileNotFound(val path: String) : FileError
+object EmptyPath : FileError {
+  override fun toString() = "EmptyPath"
+}
 ```
 
 We can finish our function, but we need to refactor our return value from `Unit` to `Content` and our error type from `EmptyPath` to `FileError`.
 
 ```kotlin
-fun readFile(path: String): Cont<FileError, Content> = cont {
+fun readFile(path: String?): Cont<FileError, Content> = cont {
+  ensureNotNull(path) { EmptyPath }
   ensure(path.isNotEmpty()) { EmptyPath }
   try {
     val lines = File(path).readLines()
@@ -83,19 +115,37 @@ The `readFile` function defines a `suspend fun` that will return:
 Since these are the properties of our `Cont` function, we can turn it into a value.
 
 ```kotlin
-suspend fun main() {
-  readFile("").toEither() //Either.Left(EmptyPath@3dd3bcd)
-  readFile("not-found").toValidated() //Validated.Invalid(FileNotFound(path=not-found)) 
-  readFile("gradle.properties").toIor() //Ior.Right(Content(body=[kotlin.code.style=official]))
-  readFile("not-found").toOption { None } //Option.None
-  readFile("nullable").fold({ _: FileError -> null }, { it }) //null
+fun main() = runBlocking<Unit> {
+  readFile("").toEither().also(::println)
+  readFile("not-found").toValidated().also(::println) 
+  readFile("gradle.properties").toIor().also(::println)
+  readFile("not-found").toOption { None }.also(::println)
+  readFile("nullable").fold({ _: FileError -> null }, { it }).also(::println)
 }
 ```
+
+> You can get the full code [here](guide/example/example-readme-02.kt).
+
+```text
+Either.Left(EmptyPath)
+Validated.Invalid(FileNotFound(path=not-found))
+Ior.Left(FileNotFound(path=gradle.properties))
+Option.None
+null
+```
+<!--- TEST -->
 
 The functions above our available out of the box, but it's easy to define your own extension functions in terms
 of `fold`. Implementing the `toEither()` operator is as simple as:
 
 ```kotlin
+import arrow.Cont
+import arrow.core.identity
+import arrow.core.Either
+import arrow.core.Option
+import arrow.core.None
+import arrow.core.Some
+
 suspend fun <R, A> Cont<R, A>.toEither(): Either<R, A> =
   fold({ Either.Left(it) }) { Either.Right(it) }
 
@@ -103,9 +153,11 @@ suspend fun <A> Cont<None, A>.toOption(): Option<A> =
   fold(::identity) { Some(it) }
 ```
 
+> You can get the full code [here](guide/example/example-readme-03.kt).
+
 Adding your own syntax to `ContEffect<R>` is tricky atm, but will be easy once "Multiple Receivers" become available.
 
-```kotlin
+```
 context(ContEffect<R>)
 suspend fun <R, A> Either<R, A>.bind(): A =
   when (this) {
@@ -128,24 +180,49 @@ There is no need to run `Cont<R, A>` into `Either<R, A>` before you can access `
 you can simply call the same functions on `Cont<R, A>` as you would on `Either<R, A>` directly.
 
 ```kotlin
+import arrow.Cont
+import arrow.cont
+import arrow.core.identity
+import kotlinx.coroutines.runBlocking
+
 val failed: Cont<String, Int> =
   cont { shift("failed") }
 
 val resolved: Cont<Nothing, Int> =
   failed.handleError { it.length }
 
-val newError: Cont<ByteArray, Int> =
+val newError: Cont<List<Char>, Int> =
   failed.handleErrorWith { str ->
-    cont { shift(str.toByteArray()) }
+    cont { shift(str.reversed().toList()) }
   }
 
-val redeemed: Cont<Nothing, String> =
-  failed.redeem(::identity, Int::toString)
+val redeemed: Cont<Nothing, Int> =
+  failed.redeem({ str -> str.length }, ::identity)
 
 val captured: Cont<String, Result<Int>> = cont<String, Int> {
   throw RuntimeException("Boom")
 }.attempt()
+
+fun main() = runBlocking<Unit> {
+  println(failed.toEither())
+  println(resolved.toEither())
+  println(newError.toEither())
+  println(redeemed.toEither())
+  println(captured.toEither())
+}
 ```
+
+> You can get the full code [here](guide/example/example-readme-04.kt).
+
+```text
+Either.Left(failed)
+Either.Right(6)
+Either.Left([d, e, l, i, a, f])
+Either.Right(6)
+Either.Right(Failure(java.lang.RuntimeException: Boom))
+```
+<!--- TEST -->
+
 
 Note:
  Handling errors can also be done with `try/catch` but this is **not recommended**, it uses `CancellationException` which is used to cancel `Coroutine`s and is advised not to capture in Kotlin. 
@@ -164,24 +241,44 @@ It's there always safe to compose `cont` with any Arrow Fx combinator. Let's see
 
 #### parZip
 ```kotlin
-cont<String, Int> {
+import arrow.cont
+import arrow.fx.coroutines.parZip
+import kotlinx.coroutines.delay
+
+suspend fun parZip(): Unit = cont<String, Int> {
   parZip({
    delay(1_000_000) // Cancelled by shift 
   }, { shift<Int>("error") }) { _, int -> int }
 }.fold(::println, ::println) // "error"
 ```
+
+> You can get the full code [here](guide/example/example-readme-05.kt).
+
 #### parTraverse
+
 ```kotlin
-cont<String, Int> {
+import arrow.cont
+import arrow.fx.coroutines.parTraverse
+import kotlinx.coroutines.delay
+
+suspend fun parTraverse() = cont<String, List<Int>> {
  (0..100).parTraverse { index -> // running tasks
    if(index == 50) shift<Int>("error")
    else index.also { delay(1_000_000) } // Cancelled by shift
  }
 }.fold(::println, ::println) // "error"
 ```
+
+> You can get the full code [here](guide/example/example-readme-06.kt).
+
 #### raceN
 ```kotlin
-cont<String, Int> {
+import arrow.cont
+import arrow.core.merge
+import arrow.fx.coroutines.raceN
+import kotlinx.coroutines.delay
+
+suspend fun race() = cont<String, Int> {
   raceN({
    delay(1_000_000) // Cancelled by shift
    5
@@ -189,50 +286,68 @@ cont<String, Int> {
    .merge() // Flatten Either<Int, Int> result from race into Int
 }.fold(::println, ::println) // "error"
 ```
+
+> You can get the full code [here](guide/example/example-readme-07.kt).
+
 #### bracketCase / Resource
 ```kotlin
-cont<String, Int> {
+import arrow.cont
+import arrow.fx.coroutines.ExitCase
+import arrow.fx.coroutines.bracketCase
+import arrow.fx.coroutines.Resource
+import arrow.fx.coroutines.fromAutoCloseable
+import java.io.BufferedReader
+import java.io.File
+
+suspend fun bracketCase() = cont<String, Int> {
   bracketCase(
-   acquire = { File("gradle.properties") },
-   use = { file -> 
+   acquire = { File("gradle.properties").bufferedReader() },
+   use = { reader -> 
     // some logic
     shift("file doesn't contain right content")
    },
-   release = { file, exitCase ->
-    file.close()
-    println(exitCase) // ExitCase.Cancelled(ShiftCancellationException("Shifted Continuation"))
+   release = { reader, exitCase -> 
+     reader.close()
+     println(exitCase) // ExitCase.Cancelled(ShiftCancellationException("Shifted Continuation"))
    }
   )
 }.fold(::println, ::println) // "file doesn't contain right content"
 
-fun file(path: String): Resource<File> {
-  Resource({ File(path) }, { file, exitCase ->
-   file.close()
-   println(exitCase)
-  })
-}
+// Available from Arrow 1.1.x
+fun <A> Resource<A>.releaseCase(releaseCase: (A, ExitCase) -> Unit): Resource<A> =
+  flatMap { a -> Resource({ a }, releaseCase) }
 
-cont<String, Int> {
- file("gradle.properties").use { file ->
+fun bufferedReader(path: String): Resource<BufferedReader> =
+  Resource.fromAutoCloseable {
+    File(path).bufferedReader()
+  }.releaseCase { _, exitCase -> println(exitCase) }
+
+suspend fun resource() = cont<String, Int> {
+  bufferedReader("gradle.properties").use { reader ->
   // some logic
   shift("file doesn't contain right content")
  } // ExitCase.Cancelled(ShiftCancellationException("Shifted Continuation")) printed from release
 }
 ```
+> You can get the full code [here](guide/example/example-readme-08.kt).
 ### KotlinX
 #### withContext
 It's always safe to call `shift` from `withContext` since it runs in place, so it has no way of leaking `shift`.
 When `shift` is called from within `withContext` it will cancel all `Job`s running inside the `CoroutineScope` of `withContext`.
 
 ```kotlin
-  cont<String, Int> {
-    withContext(Dispatchers.IO) {
-      launch { delay(1_000_000) } // launch gets cancelled due to shift(FileNotFound("failure"))
-      val sleeper = async { delay(1_000_000) } // async gets cancelled due to shift(FileNotFound("failure"))
-      readFile("failure").bind()
-      sleeper.await()
-    }
-  }.fold(::println, ::println) // FileNotFound("failure")
+import arrow.cont
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+
+suspend fun withContext() = cont<String, Int> {
+  withContext(Dispatchers.IO) {
+    launch { delay(1_000_000) } // launch gets cancelled due to shift(FileNotFound("failure"))
+    val sleeper = async { delay(1_000_000) } // async gets cancelled due to shift(FileNotFound("failure"))
+    readFile("failure").bind()
+    sleeper.await()
+  }
+}.fold(::println, ::println) // FileNotFound("failure")
 ```
 
 #### async
