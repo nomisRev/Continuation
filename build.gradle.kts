@@ -55,7 +55,7 @@ configure<KnitPluginExtension> {
 tasks {
   withType<DokkaTask>().configureEach {
     outputDirectory.set(rootDir.resolve("docs"))
-    moduleName.set("Continuation")
+    moduleName.set("Cont")
     dokkaSourceSets {
       named("commonMain") {
         includes.from("README.md")

@@ -1,4 +1,4 @@
-# Module Cont<R, A>
+# Module Cont
 
 <!--- TEST_NAME ReadmeTest -->
 <!--- TOC -->
