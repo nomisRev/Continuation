@@ -455,7 +455,7 @@ fun main() = runBlocking {
 }
 ```
 > You can get the full code [here](guide/example/example-readme-10.kt).
-<!--- TEST -->
+<!--- TEST lines.isEmpty() -->
 #### launch
 
 
