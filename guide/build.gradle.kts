@@ -8,10 +8,10 @@ repositories {
 
 dependencies {
   implementation(rootProject)
-  implementation("io.arrow-kt:arrow-fx-coroutines:1.0.0")
-  implementation("io.kotest:kotest-assertions-core:5.0.0.M3")
-  testImplementation("org.jetbrains.kotlin:kotlin-test-junit")
-  testImplementation("org.jetbrains.kotlinx:kotlinx-knit-test:0.2.3")
+  implementation(libs.arrow.fx)
+  implementation(libs.kotest.assertionsCore)
+  testImplementation(libs.kotlin.test.junit)
+  testImplementation(libs.knit.test)
 }
 
 sourceSets.test {
