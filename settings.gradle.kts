@@ -1,2 +1,2 @@
-rootProject.name = "Continuation"
+rootProject.name = "Cont"
 include("guide")
