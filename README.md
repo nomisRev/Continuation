@@ -424,9 +424,7 @@ fun main() = runBlocking<Unit> {
   }.fold(::println, ::println)
 }
 ```
-
 > You can get the full code [here](guide/example/example-readme-09.kt).
-
 ```text
 Cancelled due to shift: ShiftCancellationException(Shifted Continuation)
 Cancelled due to shift: ShiftCancellationException(Shifted Continuation)
@@ -438,12 +436,32 @@ FileNotFound(path=failure)
 
 When calling `shift` from `async` you should always call `await`, otherwise `shift` can leak out of its scope.
 
+```kotlin
+import arrow.cont
+import arrow.core.identity
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.runBlocking
+import io.kotest.matchers.collections.shouldBeIn
+
+fun main() = runBlocking {
+  coroutineScope {
+    cont<Int, String> {
+      val fa = async<String> { shift(1) }
+      val fb = async<String> { shift(2) }
+      fa.await() + fb.await()
+    }.fold(::identity, ::identity) shouldBeIn listOf(1, 2)
+  }
+}
+```
+> You can get the full code [here](guide/example/example-readme-10.kt).
+<!--- TEST -->
 #### launch
 
 
 **NOTE**
 Capturing `shift` into a lambda, and leaking it outside of `Cont` to be invoked outside will yield unexpected results.
-Below we capture `shift` from inside the DSL, and then invoke it outside its context `ContEffect<String>z
+Below we capture `shift` from inside the DSL, and then invoke it outside its context `ContEffect<String>`.
 
 ```kotlin
 cont<String, suspend () -> Unit> {
