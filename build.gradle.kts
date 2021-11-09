@@ -1,3 +1,6 @@
+import kotlinx.knit.KnitPluginExtension
+import org.jetbrains.dokka.gradle.DokkaTask
+
 buildscript {
   dependencies {
     classpath("org.jetbrains.kotlinx:kotlinx-knit:0.2.3")
@@ -7,10 +10,10 @@ buildscript {
 plugins {
   kotlin("multiplatform") version "1.5.31" apply true
   id("io.kotest.multiplatform") version "5.0.0.5" apply true
+  id("org.jetbrains.dokka") version "1.5.30" apply true
 }
 
 apply(plugin = "kotlinx-knit")
-
 
 group "com.github.nomisrev"
 version "1.0"
@@ -45,6 +48,28 @@ kotlin {
   }
 }
 
-tasks.withType<Test>().configureEach {
-  useJUnitPlatform()
+configure<KnitPluginExtension> {
+  siteRoot = "https://nomisrev.github.io/Continuation/"
+}
+
+tasks {
+  withType<DokkaTask>().configureEach {
+    dokkaSourceSets {
+      named("commonMain") {
+        moduleName.set("Continuation")
+        includes.from("README.md")
+        sourceLink {
+          localDirectory.set(file("src/commonMain/kotlin"))
+          remoteUrl.set(uri("https://github.com/nomisRev/Continuation/tree/main/src/commonMain/kotlin").toURL())
+          remoteLineSuffix.set("#L")
+        }
+      }
+    }
+  }
+
+  getByName("knitPrepare").dependsOn(getTasksByName("dokka", true))
+
+  withType<Test>().configureEach {
+    useJUnitPlatform()
+  }
 }

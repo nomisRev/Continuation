@@ -1,4 +1,4 @@
-# Cont<R, A>
+# Module Cont<R, A>
 
 <!--- TEST_NAME ReadmeTest -->
 <!--- TOC -->
@@ -26,7 +26,7 @@ receiver `suspend ContEffect<R>.() -> A`.
 
 What is interesting about the `Cont<R, A>` type is that it doesn't rely on any wrappers such as `Either`, `Ior`
 or `Validated`. Instead `Cont<R, A>` represents a suspend function, and only when we call `fold` it will actually create
-a `Continuation` and runs the computation (without intrecepting).
+a `Continuation` and runs the computation (without intercepting).
 This makes `Cont<R, A>` a very efficient generic runtime.
 
 ## Writing a program with Cont<R, A>
@@ -39,10 +39,11 @@ is not empty. If the path is empty, we want to program to result in `EmptyPath`.
 we can raise an error of any arbitrary type `R` by using the function `shift`. The name `shift` comes shifting (or
 changing, especially unexpectedly), away from the computation and finishing the `Continuation` with `R`.
 
-```kotlin
+<!--- INCLUDE
 import arrow.Cont
 import arrow.cont
-
+-->
+```kotlin
 object EmptyPath
 
 fun readFile(path: String): Cont<EmptyPath, Unit> = cont {
@@ -69,7 +70,7 @@ Now that we have the path, we can read from the `File` and return it as a domain
 We also want to take a look at what exceptions reading from a file might occur `FileNotFoundException` & `SecurityError`,
 so lets make some domain errors for those too. Grouping them as a sealed interface is useful since that way we can resolve *all* errors in a type safe manner.
 
-```kotlin
+<!--- INCLUDE
 import arrow.Cont
 import arrow.cont
 import arrow.ensureNotNull
@@ -77,7 +78,8 @@ import arrow.core.None
 import java.io.File
 import java.io.FileNotFoundException
 import kotlinx.coroutines.runBlocking
-
+-->
+```kotlin
 @JvmInline
 value class Content(val body: List<String>)
 
@@ -138,14 +140,15 @@ null
 The functions above our available out of the box, but it's easy to define your own extension functions in terms
 of `fold`. Implementing the `toEither()` operator is as simple as:
 
-```kotlin
+<!--- INCLUDE
 import arrow.Cont
 import arrow.core.identity
 import arrow.core.Either
 import arrow.core.Option
 import arrow.core.None
 import arrow.core.Some
-
+-->
+```kotlin
 suspend fun <R, A> Cont<R, A>.toEither(): Either<R, A> =
   fold({ Either.Left(it) }) { Either.Right(it) }
 
@@ -179,12 +182,13 @@ As you can see in the examples below it is possible to resolve errors of `R` or 
 There is no need to run `Cont<R, A>` into `Either<R, A>` before you can access `R`,
 you can simply call the same functions on `Cont<R, A>` as you would on `Either<R, A>` directly.
 
-```kotlin
+<!--- INCLUDE
 import arrow.Cont
 import arrow.cont
 import arrow.core.identity
 import kotlinx.coroutines.runBlocking
-
+-->
+```kotlin
 val failed: Cont<String, Int> =
   cont { shift("failed") }
 
@@ -223,7 +227,6 @@ Either.Right(Failure(java.lang.RuntimeException: Boom))
 ```
 <!--- TEST -->
 
-
 Note:
  Handling errors can also be done with `try/catch` but this is **not recommended**, it uses `CancellationException` which is used to cancel `Coroutine`s and is advised not to capture in Kotlin. 
  The `CancellationException` from `Cont` is `ShiftCancellationException`, this type is public so you can distinct the exceptions if necessary.
@@ -240,11 +243,12 @@ All operators in Arrow Fx Coroutines run in place, so they have no way of leakin
 It's there always safe to compose `cont` with any Arrow Fx combinator. Let's see some small examples below.
 
 #### parZip
-```kotlin
+<!--- INCLUDE
 import arrow.cont
 import arrow.fx.coroutines.parZip
 import kotlinx.coroutines.delay
-
+-->
+```kotlin
 suspend fun parZip(): Unit = cont<String, Int> {
   parZip({
    delay(1_000_000) // Cancelled by shift 
@@ -255,42 +259,67 @@ suspend fun parZip(): Unit = cont<String, Int> {
 > You can get the full code [here](guide/example/example-readme-05.kt).
 
 #### parTraverse
-
-```kotlin
+<!--- INCLUDE
 import arrow.cont
+import arrow.fx.coroutines.onCancel
 import arrow.fx.coroutines.parTraverse
 import kotlinx.coroutines.delay
-
-suspend fun parTraverse() = cont<String, List<Int>> {
- (0..100).parTraverse { index -> // running tasks
-   if(index == 50) shift<Int>("error")
-   else index.also { delay(1_000_000) } // Cancelled by shift
- }
-}.fold(::println, ::println) // "error"
+import kotlinx.coroutines.runBlocking
+-->
+```kotlin
+fun main() = runBlocking {
+  cont<String, List<Unit>> {
+    (1..5).parTraverse { index ->
+      if (index == 5) shift("error")
+      else onCancel({ delay(1_000_000) }) { println("I got cancelled") }
+    }
+  }.fold(::println, ::println)
+}
 ```
-
+`parTraverse` will launch 5 tasks, for every element in `1..5`.
+The last task to get scheduled will `shift` with "error", and it will cancel the other launched tasks before returning.
+```text
+I got cancelled
+I got cancelled
+I got cancelled
+I got cancelled
+error
+```
 > You can get the full code [here](guide/example/example-readme-06.kt).
+<!--- TEST -->
 
 #### raceN
-```kotlin
+<!--- INCLUDE
 import arrow.cont
 import arrow.core.merge
+import arrow.fx.coroutines.onCancel
 import arrow.fx.coroutines.raceN
 import kotlinx.coroutines.delay
-
-suspend fun race() = cont<String, Int> {
-  raceN({
-   delay(1_000_000) // Cancelled by shift
-   5
-  }) { shift<Int>("error") }
-   .merge() // Flatten Either<Int, Int> result from race into Int
-}.fold(::println, ::println) // "error"
+import kotlinx.coroutines.runBlocking
+-->
+```kotlin
+fun main() = runBlocking {
+  cont<String, Int> {
+    raceN({
+      onCancel({ delay(1_000_000) }) { println("I lost the race...") }
+      5
+    }) { shift<Int>("error") }
+      .merge() // Flatten Either<Int, Int> result from race into Int
+  }.fold(::println, ::println)
+}
 ```
-
+`raceN` races `n` suspend functions in parallel, and cancels all participating functions when a winner is found.
+We can consider the function that `shift`s the winner of the race, except with a shifted value instead of a successful one.
+So when a function in the race `shift`s, and thus short-circuiting the race, it will cancel all the participating functions. 
+```text
+I lost the race...
+error
+```
 > You can get the full code [here](guide/example/example-readme-07.kt).
+<!--- TEST -->
 
 #### bracketCase / Resource
-```kotlin
+<!--- INCLUDE
 import arrow.cont
 import arrow.fx.coroutines.ExitCase
 import arrow.fx.coroutines.bracketCase
@@ -298,7 +327,8 @@ import arrow.fx.coroutines.Resource
 import arrow.fx.coroutines.fromAutoCloseable
 import java.io.BufferedReader
 import java.io.File
-
+-->
+```kotlin
 suspend fun bracketCase() = cont<String, Int> {
   bracketCase(
    acquire = { File("gradle.properties").bufferedReader() },
@@ -330,25 +360,79 @@ suspend fun resource() = cont<String, Int> {
 }
 ```
 > You can get the full code [here](guide/example/example-readme-08.kt).
+
 ### KotlinX
 #### withContext
 It's always safe to call `shift` from `withContext` since it runs in place, so it has no way of leaking `shift`.
 When `shift` is called from within `withContext` it will cancel all `Job`s running inside the `CoroutineScope` of `withContext`.
 
-```kotlin
+<!--- INCLUDE
 import arrow.cont
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import arrow.Cont
+import arrow.ensureNotNull
+import java.io.File
+import java.io.FileNotFoundException
+import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.runBlocking
 
-suspend fun withContext() = cont<String, Int> {
-  withContext(Dispatchers.IO) {
-    launch { delay(1_000_000) } // launch gets cancelled due to shift(FileNotFound("failure"))
-    val sleeper = async { delay(1_000_000) } // async gets cancelled due to shift(FileNotFound("failure"))
-    readFile("failure").bind()
-    sleeper.await()
+@JvmInline
+value class Content(val body: List<String>)
+
+sealed interface FileError
+@JvmInline value class SecurityError(val msg: String?) : FileError
+@JvmInline value class FileNotFound(val path: String) : FileError
+object EmptyPath : FileError {
+  override fun toString() = "EmptyPath"
+}
+
+fun readFile(path: String?): Cont<FileError, Content> = cont {
+  ensureNotNull(path) { EmptyPath }
+  ensure(path.isNotEmpty()) { EmptyPath }
+  try {
+    val lines = File(path).readLines()
+    Content(lines)
+  } catch (e: FileNotFoundException) {
+    shift(FileNotFound(path))
+  } catch (e: SecurityException) {
+    shift(SecurityError(e.message))
   }
-}.fold(::println, ::println) // FileNotFound("failure")
+}
+
+fun <A: Job> A.onCancel(f: (CancellationException) -> Unit): A = also {
+  invokeOnCompletion { error ->
+    if (error is CancellationException) f(error) else Unit
+  }
+}
+-->
+
+```kotlin
+fun main() = runBlocking<Unit> {
+  cont<FileError, Int> {
+    withContext(Dispatchers.IO) {
+      launch { delay(1_000_000) }.onCancel { println("Cancelled due to shift: $it") }
+      val sleeper = async { delay(1_000_000) }.onCancel { println("Cancelled due to shift: $it") }
+      val content = readFile("failure").bind()
+      sleeper.await()
+      content.body.size
+    }
+  }.fold(::println, ::println)
+}
 ```
+
+> You can get the full code [here](guide/example/example-readme-09.kt).
+
+```text
+Cancelled due to shift: ShiftCancellationException(Shifted Continuation)
+Cancelled due to shift: ShiftCancellationException(Shifted Continuation)
+FileNotFound(path=failure)
+```
+<!--- TEST -->
 
 #### async
 
