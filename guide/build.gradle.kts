@@ -1,3 +1,5 @@
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+
 plugins {
   kotlin("jvm")
 }
@@ -8,12 +10,30 @@ repositories {
 
 dependencies {
   implementation(rootProject)
-  implementation("io.arrow-kt:arrow-fx-coroutines:1.0.0")
-  implementation("io.kotest:kotest-assertions-core:5.0.0.M3")
-  testImplementation("org.jetbrains.kotlin:kotlin-test-junit")
-  testImplementation("org.jetbrains.kotlinx:kotlinx-knit-test:0.2.3")
+  implementation(libs.arrow.fx)
+  implementation(libs.kotest.assertionsCore)
+  implementation(libs.kotest.property)
+
+  testImplementation(libs.kotest.runnerJUnit5)
+  testImplementation(libs.kotest.frameworkEngine)
 }
 
 sourceSets.test {
   java.srcDirs("example", "test")
+}
+
+tasks {
+  withType<Test>().configureEach {
+    useJUnitPlatform()
+    testLogging {
+      setExceptionFormat("full")
+      setEvents(listOf("passed", "skipped", "failed", "standardOut", "standardError"))
+    }
+  }
+
+  withType<KotlinCompile>().configureEach {
+    kotlinOptions.jvmTarget = "1.8"
+    sourceCompatibility = "1.8"
+    targetCompatibility = "1.8"
+  }
 }

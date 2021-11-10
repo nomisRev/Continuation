@@ -1,5 +1,6 @@
 import kotlinx.knit.KnitPluginExtension
 import org.jetbrains.dokka.gradle.DokkaTask
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 buildscript {
   dependencies {
@@ -9,8 +10,10 @@ buildscript {
 
 plugins {
   kotlin("multiplatform") version "1.5.31" apply true
-  id("io.kotest.multiplatform") version "5.0.0.5" apply true
-  id("org.jetbrains.dokka") version "1.5.30" apply true
+  alias(libs.plugins.kotest.multiplatform)
+  alias(libs.plugins.arrowGradleConfig.multiplatform)
+  alias(libs.plugins.arrowGradleConfig.formatter)
+  alias(libs.plugins.dokka)
 }
 
 apply(plugin = "kotlinx-knit")
@@ -23,26 +26,34 @@ repositories {
 }
 
 kotlin {
-  jvm()
-
   sourceSets {
     commonMain {
       dependencies {
-        api(kotlin("stdlib-common"))
-        api("io.arrow-kt:arrow-core:1.0.0")
+        api(libs.kotlin.stdlibCommon)
+        api(libs.arrow.core)
       }
     }
     commonTest {
       dependencies {
-        implementation("io.kotest:kotest-property:5.0.0.M3")
-        implementation("io.kotest:kotest-framework-engine:5.0.0.M3")
-        implementation("io.kotest:kotest-assertions-core:5.0.0.M3")
-        implementation("io.arrow-kt:arrow-fx-coroutines:1.0.0")
+        implementation(libs.arrow.fx)
+        implementation(libs.kotest.frameworkEngine)
+        implementation(libs.kotest.assertionsCore)
+        implementation(libs.kotest.property)
+      }
+    }
+    jvmMain {
+      dependencies {
+        implementation(libs.kotlin.stdlibJDK8)
+      }
+    }
+    jsMain {
+      dependencies {
+        implementation(libs.kotlin.stdlibJS)
       }
     }
     named("jvmTest") {
       dependencies {
-        implementation("io.kotest:kotest-runner-junit5:5.0.0.M3")
+        implementation(libs.kotest.runnerJUnit5)
       }
     }
   }
@@ -76,5 +87,11 @@ tasks {
 
   withType<Test>().configureEach {
     useJUnitPlatform()
+  }
+
+  withType<KotlinCompile>().configureEach {
+    kotlinOptions.jvmTarget = "1.8"
+    sourceCompatibility = "1.8"
+    targetCompatibility = "1.8"
   }
 }
