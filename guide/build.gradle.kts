@@ -14,6 +14,7 @@ dependencies {
   implementation(libs.kotest.assertionsCore)
   implementation(libs.kotest.property)
 
+  testImplementation(libs.arrow.core.test)
   testImplementation(libs.kotest.runnerJUnit5)
   testImplementation(libs.kotest.frameworkEngine)
 }
