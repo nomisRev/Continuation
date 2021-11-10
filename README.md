@@ -343,12 +343,7 @@ suspend fun test() {
 }
 ```
 > You can get the full code [here](guide/example/example-readme-09.kt).
-```text
-Cancelled due to shift: ShiftCancellationException(Shifted Continuation)
-Cancelled due to shift: ShiftCancellationException(Shifted Continuation)
-FileNotFound(path=failure)
-```
-<!--- TEST -->
+<!--- TEST lines.isEmpty() -->
 
 #### async
 
