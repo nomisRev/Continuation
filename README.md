@@ -15,6 +15,7 @@
     * [withContext](#withcontext)
     * [async](#async)
     * [launch](#launch)
+    * [Strange edge cases](#strange-edge-cases)
 
 <!--- END -->
 
@@ -56,7 +57,8 @@ So let's rewrite the function from above to use the DSL instead.
 
 ```kotlin
 fun readFile2(path: String?): Cont<EmptyPath, Unit> = cont {
-  ensure(!path.isNullOrBlank()) { EmptyPath }
+  ensureNotNull(path) { EmptyPath }
+  ensure(path.isEmpty()) { EmptyPath }
 }
 ```
 
@@ -109,15 +111,16 @@ Since these are the properties of our `Cont` function, we can turn it into a val
 ```kotlin
 suspend fun test() {
   readFile("").toEither() shouldBe Either.Left(EmptyPath)
-  readFile("not-found").toValidated() shouldBe  Validated.Invalid(FileNotFound("not-found"))
+  readFile("knit.properties").toValidated() shouldBe  Validated.Invalid(FileNotFound("knit.properties"))
   readFile("gradle.properties").toIor() shouldBe Ior.Left(FileNotFound("gradle.properties"))
-  readFile("not-found").toOption { None } shouldBe None
-  readFile("nullable").fold({ _: FileError -> null }, { it }) shouldBe null
+  readFile("README.MD").toOption { None } shouldBe None
+
+  readFile("build.gradle.kts").fold({ _: FileError -> null }, { it })
+    .shouldBeInstanceOf<Content>()
+    .body.shouldNotBeEmpty()
 }
 ```
-
 > You can get the full code [here](guide/example/example-readme-02.kt).
-
 <!--- TEST lines.isEmpty() -->
 
 The functions above our available out of the box, but it's easy to define your own extension functions in terms
@@ -184,14 +187,12 @@ suspend fun test() {
   captured.toEither() shouldBe Either.Right(Result.success(1))
 }
 ```
-
 > You can get the full code [here](guide/example/example-readme-04.kt).
-
 <!--- TEST lines.isEmpty() -->
 
 Note:
  Handling errors can also be done with `try/catch` but this is **not recommended**, it uses `CancellationException` which is used to cancel `Coroutine`s and is advised not to capture in Kotlin. 
- The `CancellationException` from `Cont` is `ShiftCancellationException`, this type is public so you can distinct the exceptions if necessary.
+ The `CancellationException` from `Cont` is `ShiftCancellationException`, this a public type so it can be distinguished from any other `CancellationException` if necessary.
 
 ## Structured Concurrency
 
@@ -199,6 +200,15 @@ Note:
 For this reason `shift` adheres to the same rules as [`Structured Concurrency`](https://kotlinlang.org/docs/coroutines-basics.html#structured-concurrency)
 
 Let's overview below how `shift` behaves with the different concurrency builders from Arrow Fx & KotlinX Coroutines.
+In the examples below we're going to be using a utility to show how _sibling tasks_ get cancelled.
+The utility function show below called `awaitExitCase` will `never` finish suspending, and completes a `Deferred` with the `ExitCase`.
+`ExitCase` is a sealed class that can be a value of `Failure(Throwable)`, `Cancelled(CancellationException)`, or `Completed`.
+Since `awaitExitCase` suspends forever, it can only result in `Cancelled(CancellationException)`.
+
+```kotlin
+suspend fun <A> awaitExitCase(exit: CompletableDeferred<ExitCase>): A =
+  guaranteeCase(::awaitCancellation) { exitCase -> exit.complete(exitCase) }
+```
 
 ### Arrow Fx Coroutines
 All operators in Arrow Fx Coroutines run in place, so they have no way of leaking `shift`.
@@ -206,26 +216,36 @@ It's there always safe to compose `cont` with any Arrow Fx combinator. Let's see
 
 #### parZip
 ```kotlin
-suspend fun parZip(): Unit = cont<String, Int> {
-  parZip({
-   delay(1_000_000) // Cancelled by shift 
-  }, { shift<Int>("error") }) { _, int -> int }
-}.fold(::println, ::println) // "error"
+suspend fun test() = checkAll(Arb.string()) { error ->
+  val exit = CompletableDeferred<ExitCase>()
+  cont<String, Int> {
+    parZip({ awaitExitCase<Int>(exit) }, { shift<Int>(error) }) { a, b -> a + b }
+  }.fold({ it shouldBe error }, { fail("Int can never be the result") })
+  exit.await().shouldBeTypeOf<ExitCase>()
+}
 ```
-
 > You can get the full code [here](guide/example/example-readme-05.kt).
+[comment]: <> (Test disabled due to missing join in parZip)
 
 #### parTraverse
+<!--- INCLUDE
+suspend fun <A> awaitExitCase(exit: CompletableDeferred<ExitCase>): A =
+  guaranteeCase(::awaitCancellation) { exitCase -> exit.complete(exitCase) }
+
+suspend fun <A> CompletableDeferred<A>.getOrNull(): A? =
+  if (isCompleted) await() else null
+-->
 ```kotlin
-suspend fun test() {
+suspend fun test() = checkAll(Arb.string()) { error ->
   val exits = (0..3).map { CompletableDeferred<ExitCase>() }
   cont<String, List<Unit>> {
     (0..4).parTraverse { index ->
-      if (index == 4) shift("error")
-      else guaranteeCase({ delay(1_000_000) }) { exitCase -> require(exits[index].complete(exitCase)) }
+      if (index == 4) shift(error)
+      else awaitExitCase(exits[index])
     }
-  }.fold({ msg -> msg shouldBe "error" }, { fail("Int can never be the result") })
-  exits.awaitAll().forEach { it.shouldBeTypeOf<ExitCase.Cancelled>() }
+  }.fold({ msg -> msg shouldBe error }, { fail("Int can never be the result") })
+  // It's possible not all parallel task got launched, and in those cases awaitCancellation never ran
+  exits.forEach { exit -> exit.getOrNull()?.shouldBeTypeOf<ExitCase.Cancelled>() }
 }
 ```
 `parTraverse` will launch 5 tasks, for every element in `1..5`.
@@ -235,17 +255,22 @@ The last task to get scheduled will `shift` with "error", and it will cancel the
 <!--- TEST lines.isEmpty() -->
 
 #### raceN
+<!--- INCLUDE
+suspend fun <A> awaitExitCase(exit: CompletableDeferred<ExitCase>): A =
+  guaranteeCase(::awaitCancellation) { exitCase -> exit.complete(exitCase) }
+
+suspend fun <A> CompletableDeferred<A>.getOrNull(): A? =
+  if (isCompleted) await() else null
+-->
 ```kotlin
-suspend fun test() {
+suspend fun test() = checkAll(Arb.string()) { error ->
   val exit = CompletableDeferred<ExitCase>()
   cont<String, Int> {
-    raceN({
-      guaranteeCase({ delay(1_000_000) }) { exitCase -> require(exit.complete(exitCase))  }
-      5
-    }) { shift<Int>("error") }
+    raceN({ awaitExitCase<Int>(exit) }) { shift<Int>(error) }
       .merge() // Flatten Either<Int, Int> result from race into Int
-  }.fold({ msg -> msg shouldBe "error" }, { fail("Int can never be the result") })
-  exit.await().shouldBeTypeOf<ExitCase.Cancelled>()
+  }.fold({ msg -> msg shouldBe error }, { fail("Int can never be the result") })
+  // It's possible not all parallel task got launched, and in those cases awaitCancellation never ran
+  exit.getOrNull()?.shouldBeTypeOf<ExitCase.Cancelled>()
 }
 ```
 `raceN` races `n` suspend functions in parallel, and cancels all participating functions when a winner is found.
@@ -259,37 +284,48 @@ So when a function in the race `shift`s, and thus short-circuiting the race, it 
 import java.io.*
 -->
 ```kotlin
-suspend fun bracketCase() = cont<String, Int> {
-  bracketCase(
-   acquire = { File("gradle.properties").bufferedReader() },
-   use = { reader -> 
-    // some logic
-    shift("file doesn't contain right content")
-   },
-   release = { reader, exitCase -> 
-     reader.close()
-     println(exitCase) // ExitCase.Cancelled(ShiftCancellationException("Shifted Continuation"))
-   }
-  )
-}.fold(::println, ::println) // "file doesn't contain right content"
-
-// Available from Arrow 1.1.x
-fun <A> Resource<A>.releaseCase(releaseCase: (A, ExitCase) -> Unit): Resource<A> =
-  flatMap { a -> Resource({ a }, releaseCase) }
-
-fun bufferedReader(path: String): Resource<BufferedReader> =
-  Resource.fromAutoCloseable {
-    File(path).bufferedReader()
-  }.releaseCase { _, exitCase -> println(exitCase) }
-
-suspend fun resource() = cont<String, Int> {
-  bufferedReader("gradle.properties").use { reader ->
-  // some logic
-  shift("file doesn't contain right content")
- } // ExitCase.Cancelled(ShiftCancellationException("Shifted Continuation")) printed from release
+suspend fun test() = checkAll(Arb.string()) { error ->
+  val exit = CompletableDeferred<ExitCase>()
+  cont<String, Int> {
+    bracketCase(
+      acquire = { File("build.gradle.kts").bufferedReader() },
+      use = { reader: BufferedReader -> shift(error) },
+      release = { reader, exitCase ->
+        reader.close()
+        exit.complete(exitCase)
+      }
+    )
+  }.fold({ it shouldBe error }, { fail("Int can never be the result") })
+  exit.await().shouldBeTypeOf<ExitCase.Cancelled>()
 }
 ```
 > You can get the full code [here](guide/example/example-readme-08.kt).
+<!--- TEST lines.isEmpty() -->
+
+<!--- INCLUDE
+import java.io.*
+
+fun <A> Resource<A>.releaseCase(releaseCase: suspend (A, ExitCase) -> Unit): Resource<A> =
+  flatMap { a -> Resource({ a }, releaseCase) }
+-->
+```kotlin
+suspend fun test() = checkAll(Arb.string()) { error ->
+  val exit = CompletableDeferred<ExitCase>()
+
+  fun bufferedReader(path: String): Resource<BufferedReader> =
+    Resource.fromAutoCloseable { File(path).bufferedReader() }
+      .releaseCase { _, exitCase -> exit.complete(exitCase) }
+
+  cont<String, Int> {
+    val lineCount = bufferedReader("build.gradle.kts")
+      .use { reader -> shift<Int>(error) }
+    lineCount
+  }.fold({ it shouldBe error }, { fail("Int can never be the result") })
+  exit.await().shouldBeTypeOf<ExitCase.Cancelled>()
+}
+```
+> You can get the full code [here](guide/example/example-readme-09.kt).
+<!--- TEST lines.isEmpty() -->
 
 ### KotlinX
 #### withContext
@@ -322,48 +358,61 @@ fun readFile(path: String?): Cont<FileError, Content> = cont {
   }
 }
 
-fun <A: Job> A.onCancel(f: (CancellationException) -> Unit): A = also {
-  invokeOnCompletion { error ->
-    if (error is CancellationException) f(error) else Unit
-  }
-}
+suspend fun <A> awaitExitCase(exit: CompletableDeferred<ExitCase>): A =
+  guaranteeCase(::awaitCancellation) { exitCase -> exit.complete(exitCase) }
 -->
 ```kotlin
 suspend fun test() {
-  val exit = CompletableDeferred<CancellationException>()
+  val exit = CompletableDeferred<ExitCase>()
   cont<FileError, Int> {
     withContext(Dispatchers.IO) {
-      val job = launch { delay(1_000_000) }.onCancel { ce -> require(exit.complete(ce)) }
+      val job = launch { awaitExitCase(exit) }
       val content = readFile("failure").bind()
       job.join()
       content.body.size
     }
   }.fold({ e -> e shouldBe FileNotFound("failure") }, { fail("Int can never be the result") })
-  exit.await().shouldBeInstanceOf<CancellationException>()
-}
-```
-> You can get the full code [here](guide/example/example-readme-09.kt).
-<!--- TEST lines.isEmpty() -->
-
-#### async
-
-When calling `shift` from `async` you should always call `await`, otherwise `shift` can leak out of its scope.
-
-```kotlin
-suspend fun test() {
-  coroutineScope {
-    cont<Int, String> {
-      val fa = async<String> { shift(1) }
-      val fb = async<String> { shift(2) }
-      fa.await() + fb.await()
-    }.fold(::identity, ::identity) shouldBeIn listOf(1, 2)
-  }
+  exit.await().shouldBeInstanceOf<ExitCase>()
 }
 ```
 > You can get the full code [here](guide/example/example-readme-10.kt).
 <!--- TEST lines.isEmpty() -->
+
+#### async
+
+When calling `shift` from `async` you should **always** call `await`, otherwise `shift` can leak out of its scope.
+
+```kotlin
+suspend fun test() = checkAll(Arb.string(), Arb.string()) { errorA, errorB ->
+  coroutineScope {
+    cont<String, Int> {
+      val fa = async<Int> { shift(errorA) }
+      val fb = async<Int> { shift(errorB) }
+      fa.await() + fb.await()
+    }.fold({ error -> error shouldBeIn listOf(errorA, errorB) }, { fail("Int can never be the result") }) 
+  }
+}
+```
+> You can get the full code [here](guide/example/example-readme-11.kt).
+<!--- TEST lines.isEmpty() -->
+
 #### launch
 
+```kotlin
+suspend fun test() = checkAll(Arb.string(), Arb.string(), Arb.int()) { errorA, errorB, int ->
+  cont<String, Int> {
+    coroutineScope<Int> {
+      launch { shift(errorA) }
+      launch { shift(errorB) }
+      int
+    }
+  }.fold({ fail("Shift can never finish") }, { it shouldBe int })
+}
+```
+> You can get the full code [here](guide/example/example-readme-12.kt).
+<!--- TEST lines.isEmpty() -->
+
+#### Strange edge cases
 
 **NOTE**
 Capturing `shift` into a lambda, and leaking it outside of `Cont` to be invoked outside will yield unexpected results.
