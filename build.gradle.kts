@@ -9,7 +9,7 @@ buildscript {
 }
 
 plugins {
-  kotlin("multiplatform") version "1.5.31" apply true
+  alias(libs.plugins.kotlin.multiplatform) apply true
   alias(libs.plugins.kotest.multiplatform)
   alias(libs.plugins.arrowGradleConfig.multiplatform)
   alias(libs.plugins.arrowGradleConfig.formatter)
