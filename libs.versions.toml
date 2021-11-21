@@ -8,7 +8,7 @@ kotestGradle = "5.0.0.5"
 kotlin = "1.5.31"
 kotlinBinaryCompatibilityValidator = "0.8.0"
 githooks = "0.0.2"
-knit = "0.2.3"
+knit = "0.3.0"
 
 [libraries]
 arrow-core = { module = "io.arrow-kt:arrow-core", version.ref = "arrow" }
