@@ -4,12 +4,12 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 buildscript {
   dependencies {
-    classpath("org.jetbrains.kotlinx:kotlinx-knit:0.2.3")
+    classpath("org.jetbrains.kotlinx:kotlinx-knit:0.3.0")
   }
 }
 
 plugins {
-  kotlin("multiplatform") version "1.5.31" apply true
+  alias(libs.plugins.kotlin.multiplatform) apply true
   alias(libs.plugins.kotest.multiplatform)
   alias(libs.plugins.arrowGradleConfig.multiplatform)
   alias(libs.plugins.arrowGradleConfig.formatter)

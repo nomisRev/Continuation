@@ -1,6 +1,7 @@
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
+  // TODO this can be MPP
   kotlin("jvm")
 }
 
@@ -9,11 +10,10 @@ repositories {
 }
 
 dependencies {
-  implementation(rootProject)
-  implementation(libs.arrow.fx)
-  implementation(libs.kotest.assertionsCore)
-  implementation(libs.kotest.property)
-
+  testImplementation(rootProject)
+  testImplementation(libs.arrow.fx)
+  testImplementation(libs.kotest.assertionsCore)
+  testImplementation(libs.kotest.property)
   testImplementation(libs.arrow.core.test)
   testImplementation(libs.kotest.runnerJUnit5)
   testImplementation(libs.kotest.frameworkEngine)
