@@ -9,7 +9,6 @@ buildscript {
 }
 
 plugins {
-  `maven-publish` // jitpack.io
   alias(libs.plugins.kotlin.multiplatform) apply true
   alias(libs.plugins.kotest.multiplatform)
   alias(libs.plugins.arrowGradleConfig.multiplatform)
