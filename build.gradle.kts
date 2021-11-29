@@ -8,12 +8,14 @@ buildscript {
   }
 }
 
+@Suppress("DSL_SCOPE_VIOLATION")
 plugins {
-  alias(libs.plugins.kotlin.multiplatform) apply true
+  alias(libs.plugins.kotlin.multiplatform) apply false
   alias(libs.plugins.kotest.multiplatform)
   alias(libs.plugins.arrowGradleConfig.multiplatform)
   alias(libs.plugins.arrowGradleConfig.formatter)
   alias(libs.plugins.dokka)
+  alias(libs.plugins.kover)
 }
 
 apply(plugin = "kotlinx-knit")
