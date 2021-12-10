@@ -44,7 +44,7 @@ changing, especially unexpectedly), away from the computation and finishing the 
 object EmptyPath
 
 fun readFile(path: String): Cont<EmptyPath, Unit> = cont {
-  if (path.isNotEmpty()) shift(EmptyPath) else Unit
+  if (path.isEmpty()) shift(EmptyPath) else Unit
 }
 ```
 
