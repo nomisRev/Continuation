@@ -1,3 +1,5 @@
+**ARCHIVED: This has been moved into [Arrow](https://arrow-kt.io/)**
+
 # Module Cont
 
 <!--- TEST_NAME ReadmeSpec -->
